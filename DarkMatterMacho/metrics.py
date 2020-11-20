@@ -50,8 +50,8 @@ def detect_mass(mjd_obs, ra_obs, dec_obs, time_scale) :
     There is no cumulative time counting here: if the range of MJDs is 5 years while 
     the timescale is 1 year, as long as any one year passes criteria 4, then criteria 4 is passed
     """
-    #verbose = False
-    verbose = True
+    verbose = False
+    #verbose = True
     min_visits = 30
     min_visits_year = 10
     detectable = True
