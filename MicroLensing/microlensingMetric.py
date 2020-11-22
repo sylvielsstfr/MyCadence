@@ -7,6 +7,16 @@ from lsst.sims.utils import hpid2RaDec, equatorialFromGalactic
 import lsst.sims.maf.slicers as slicers
 
 import numpy as np
+import healpy as hp
+
+def IndexToDeclRa(index,nside):
+    theta,phi=hp.pixelfunc.pix2ang(nside,index)
+    return -np.degrees(theta-np.pi/2.),np.degrees(np.pi*2.-phi)
+    #return np.degrees(theta),np.degrees(phi)
+
+def DeclRaToIndex(decl,RA,nside):
+    return hp.pixelfunc.ang2pix(nside,np.radians(-decl+90.),np.radians(360.-RA))
+
 
 # Via Natasha Abrams nsabrams@college.harvard.edu
 def microlensing_amplification(t, impact_parameter=1, crossing_time=1825., peak_time=100):
@@ -176,40 +186,76 @@ def generateMicrolensingSlicer(min_crossing_time=1, max_crossing_time=10, t_star
     impact_paramters = np.random.uniform(low=0, high=1, size=n_events)
 
     # probably read an healpix map of star density     
-    mapDir = os.path.join(getPackageDir('sims_maps'), 'TriMaps')
-    data = np.load(os.path.join(mapDir, 'TRIstarDensity_%s_nside_%i.npz' % (filtername, nside)))
-    starDensity = data['starDensity'].copy()
+    #mapDir = os.path.join(getPackageDir('sims_maps'), 'TriMaps')
+    #data = np.load(os.path.join(mapDir, 'TRIstarDensity_%s_nside_%i.npz' % (filtername, nside)))
+    #starDensity = data['starDensity'].copy()
     # healpix bins
-    bins = data['bins'].copy()
-    data.close()
-    
-    hp.read_map("densityMap-I_345_gaia2-64.hpx")
+    #bins = data['bins'].copy()
+    #data.close()
+
+    nside = 64
+    npix = hp.nside2npix(nside)
+    themap=hp.read_map("densityMap-I_345_gaia2-64.hpx")
+    imap = themap.astype(np.int64)
+
+
 
     # probably assign a fixed magnitude to stars
     star_mag = 22
     # bin indexes where magnitude is higher than 22
-    bin_indx = np.where(bins[1:] >= star_mag)[0].min()
-    density_used = starDensity[:, bin_indx].ravel()
+    #bin_indx = np.where(bins[1:] >= star_mag)[0].min()
+    #density_used = starDensity[:, bin_indx].ravel()
     # an ordering
-    order = np.argsort(density_used)
+    #order = np.argsort(density_used)
     # I think the model might have a few outliers at the extreme, let's truncate it a bit
-    density_used[order[-10:]] = density_used[order[-11]]
+    #density_used[order[-10:]] = density_used[order[-11]]
+
+    density = imap
+    # order bins by increasing density
+    order_idx = np.argsort(density)
+    # density ordered
+    density_sorted = density[order_idx]
+    # computed ordered probability
+    dist = density_sorted ** 2
+    # dist = density
+    cumm_dist = np.cumsum(dist)
+    cumm_dist = cumm_dist / np.max(cumm_dist)
+    uniform_draw = np.random.uniform(size=n_events)
+    # selected sorted indexes
+    sel_sorted_indexes = np.floor(np.interp(uniform_draw, cumm_dist, np.arange(cumm_dist.size)))
+
 
     # now, let's draw N from that distribution squared
-    dist = density_used[order]**2
-    cumm_dist = np.cumsum(dist)
-    cumm_dist = cumm_dist/np.max(cumm_dist)
-    uniform_draw = np.random.uniform(size=n_events)
-    indexes = np.floor(np.interp(uniform_draw, cumm_dist, np.arange(cumm_dist.size)))
+    #dist = density_used[order]**2
+    #cumm_dist = np.cumsum(dist)
+    #cumm_dist = cumm_dist/np.max(cumm_dist)
+    #uniform_draw = np.random.uniform(size=n_events)
+    #indexes = np.floor(np.interp(uniform_draw, cumm_dist, np.arange(cumm_dist.size)))
     # get healpix index
-    hp_ids = order[indexes.astype(int)]
+    #hp_ids = order[indexes.astype(int)]
     # convert healpix to galactic coordinates
-    gal_l, gal_b = hpid2RaDec(nside, hp_ids, nest=True)
+    #gal_l, gal_b = hpid2RaDec(nside, hp_ids, nest=True)
     # convert galactic coordinates to ra,dec
-    ra, dec = equatorialFromGalactic(gal_l, gal_b)
+    #ra, dec = equatorialFromGalactic(gal_l, gal_b)
+
+    # draw sorted indexes
+    uniform_draw = np.random.uniform(size=n_events)
+    sel_sorted_indexes = np.floor(np.interp(uniform_draw, cumm_dist, np.arange(cumm_dist.size)))
+    sel_sorted_indexes = sel_sorted_indexes.astype(np.int64)
+    # retrieve healpy indexes from random drawn indexes
+    reorder_indexes = order_idx[sel_sorted_indexes]
+    all_ra = np.zeros(n_events)
+    all_dec = np.zeros(n_events)
+    count = 0
+    for idx in reorder_indexes:
+        dec, ra = IndexToDeclRa(idx, nside)
+        ra=360-ra
+        all_dec[count] = dec
+        all_ra[count] = ra
+        count += 1
 
     # Set up the slicer to evaluate the catalog we just made
-    slicer = slicers.UserPointsSlicer(ra, dec, latLonDeg=True, badval=0)
+    slicer = slicers.UserPointsSlicer(all_ra, all_dec, latLonDeg=True, badval=0)
     # Add any additional information about each object to the slicer
     slicer.slicePoints['peak_time'] = peak_times
     slicer.slicePoints['crossing_time'] = crossing_times
